@@ -32,7 +32,9 @@ class MsgSerializer:
 
     @staticmethod
     def from_bytes(data: bytes) -> dict:
-        return msgpack.unpackb(data, object_hook=MsgSerializer.decode_custom_classes)
+        unpacker = msgpack.Unpacker(object_hook=MsgSerializer.decode_custom_classes, raw=False)
+        unpacker.feed(data)
+        return next(unpacker)
 
     @staticmethod
     def decode_custom_classes(obj):

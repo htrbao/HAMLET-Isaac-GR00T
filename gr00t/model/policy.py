@@ -270,6 +270,7 @@ class Gr00tPolicy(BasePolicy):
 
         # Create a copy to avoid mutating input
         obs_copy = observations.copy()
+        print(obs_copy)
 
         is_batch = self._check_state_is_batched(obs_copy)
         if not is_batch:
