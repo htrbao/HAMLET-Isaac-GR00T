@@ -842,24 +842,13 @@ class AgibotGenie1DataConfig(BaseDataConfig):
 ###########################################################################################
 
 class LiberoMemConfig(BaseDataConfig):
-    video_keys = ["video.image", "video.wrist_image"]
+    video_keys = ["video.image"]
+    video_crop_scale = 0.95
     state_keys = [
-        "state.x",
-        "state.y",
-        "state.z",
-        "state.roll",
-        "state.pitch",
-        "state.yaw",
-        "state.gripper"
+        "state.state"
     ]
     action_keys = [
-        "action.x",
-        "action.y",
-        "action.z",
-        "action.roll",
-        "action.pitch",
-        "action.yaw",
-        "action.gripper"
+        "action.actions"
     ]
     language_keys = ["annotation.human.action.task_description"]
     observation_indices = [0]
@@ -895,7 +884,7 @@ class LiberoMemConfig(BaseDataConfig):
         transforms = [
             # video transforms
             VideoToTensor(apply_to=self.video_keys),
-            VideoCrop(apply_to=self.video_keys, scale=0.95),
+            VideoCrop(apply_to=self.video_keys, scale=self.video_crop_scale),
             VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
             VideoColorJitter(
                 apply_to=self.video_keys,
@@ -1057,6 +1046,167 @@ class LiberoMemHamletDataConfig(LiberoMemConfig):
         return ComposedModalityTransform(transforms=new_transforms)
 
 
+class LiberoMemHamletCrop1DataConfig(LiberoMemHamletDataConfig):
+    """`libero_mem_hamlet` without the 0.95 crop, matching the baseline-rgbonly preprocessing."""
+
+    video_crop_scale = 1.0
+
+
+class LiberoMemContrastiveSvDataConfig(LiberoMemConfig):
+    """Single-view TCL pretraining variant of `libero_mem` (see SinglePandaGripperContrastiveSvDataConfig)."""
+
+    video_crop_scale = 1.0
+    video_observation_indices = [0, -999]
+
+    def modality_config(self) -> dict[str, ModalityConfig]:
+        cfg = super().modality_config()
+        cfg["video"] = ModalityConfig(
+            delta_indices=self.video_observation_indices,
+            modality_keys=self.video_keys,
+        )
+        return cfg
+
+    def transform(self):
+        from gr00t.model.transforms import HamletTclTransform
+
+        base = super().transform()
+        new_transforms = list(base.transforms[:-1]) + [
+            HamletTclTransform(
+                state_horizon=len(self.observation_indices),
+                action_horizon=len(self.action_indices),
+                max_state_dim=64,
+                max_action_dim=32,
+            )
+        ]
+        return ComposedModalityTransform(transforms=new_transforms)
+
+
+class VRH3TwoHandConfig(BaseDataConfig):
+    video_keys = ["video.cam_front"]
+    state_keys = [
+        "state.left_arm",
+        "state.right_arm",
+        "state.left_hand",
+        "state.right_hand",
+        "state.velocity_left_arm",
+        "state.velocity_right_arm",
+        "state.velocity_left_hand",
+        "state.velocity_right_hand",
+        "state.effort_left_arm",
+        "state.effort_right_arm",
+        "state.effort_left_hand",
+        "state.effort_right_hand",
+    ]
+    action_keys = [
+        "action.left_arm",
+        "action.right_arm",
+        "action.left_hand",
+        "action.right_hand",
+    ]
+    language_keys = ["annotation.human.task_description"]
+    observation_indices = [0]
+    state_indices = [0]
+    action_indices = list(range(16))
+
+    def modality_config(self):
+        video_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.video_keys,
+        )
+        state_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.state_keys,
+        )
+        action_modality = ModalityConfig(
+            delta_indices=self.action_indices,
+            modality_keys=self.action_keys,
+        )
+        language_modality = ModalityConfig(
+            delta_indices=self.observation_indices,
+            modality_keys=self.language_keys,
+        )
+        modality_configs = {
+            "video": video_modality,
+            "state": state_modality,
+            "action": action_modality,
+            "language": language_modality,
+        }
+        return modality_configs
+
+    def transform(self):
+        transforms = [
+            # video transforms
+            VideoToTensor(apply_to=self.video_keys),
+            VideoCrop(apply_to=self.video_keys, scale=0.95),
+            VideoResize(apply_to=self.video_keys, height=224, width=224, interpolation="linear"),
+            VideoColorJitter(
+                apply_to=self.video_keys,
+                brightness=0.3,
+                contrast=0.4,
+                saturation=0.5,
+                hue=0.08,
+            ),
+            VideoToNumpy(apply_to=self.video_keys),
+            # state transforms
+            StateActionToTensor(apply_to=self.state_keys),
+            StateActionTransform(
+                apply_to=self.state_keys,
+                normalization_modes={key: "min_max" for key in self.state_keys},
+                # target_rotations={
+                #     "state.end_effector_rotation_relative": "rotation_6d",
+                #     "state.base_rotation": "rotation_6d",
+                # },
+            ),
+            # action transforms
+            StateActionToTensor(apply_to=self.action_keys),
+            StateActionTransform(
+                apply_to=self.action_keys,
+                normalization_modes={key: "min_max" for key in self.action_keys},
+            ),
+            # concat transforms
+            ConcatTransform(
+                video_concat_order=self.video_keys,
+                state_concat_order=self.state_keys,
+                action_concat_order=self.action_keys,
+            ),
+            GR00TTransform(
+                state_horizon=len(self.observation_indices),
+                action_horizon=len(self.action_indices),
+                max_state_dim=64,
+                max_action_dim=32,
+            ),
+        ]
+
+        return ComposedModalityTransform(transforms=transforms)
+
+class VRH3TwoHandHamletDataConfig(VRH3TwoHandConfig):
+    """K-step HAMLET finetune variant of `vrh3_two_hand` (see LiberoMemHamletDataConfig)."""
+
+    video_observation_indices = [-48, -32, -16, 0]  # K=4, stride=16 default
+
+    def modality_config(self) -> dict[str, ModalityConfig]:
+        cfg = super().modality_config()
+        cfg["video"] = ModalityConfig(
+            delta_indices=self.video_observation_indices,
+            modality_keys=self.video_keys,
+        )
+        return cfg
+
+    def transform(self):
+        from gr00t.model.transforms import HamletKStepTransform
+
+        base = super().transform()
+        new_transforms = list(base.transforms[:-1]) + [
+            HamletKStepTransform(
+                state_horizon=len(self.observation_indices),
+                action_horizon=len(self.action_indices),
+                max_state_dim=64,
+                max_action_dim=32,
+            )
+        ]
+        return ComposedModalityTransform(transforms=new_transforms)
+
+
 ###########################################################################################
 
 DATA_CONFIG_MAP = {
@@ -1076,5 +1226,9 @@ DATA_CONFIG_MAP = {
     "droid_eef": DroidEEFDataConfig(),
     "agibot_genie1": AgibotGenie1DataConfig(),
     "libero_mem": LiberoMemConfig(),
-    "libero_mem_hamlet": LiberoMemHamletDataConfig()
+    "libero_mem_hamlet": LiberoMemHamletDataConfig(),
+    "libero_mem_hamlet_crop1": LiberoMemHamletCrop1DataConfig(),
+    "libero_mem_contrastive_sv": LiberoMemContrastiveSvDataConfig(),
+    "vrh3_two_hand": VRH3TwoHandConfig(),
+    "vrh3_two_hand_hamlet": VRH3TwoHandHamletDataConfig(),
 }
