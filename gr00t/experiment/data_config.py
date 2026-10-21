@@ -1207,6 +1207,18 @@ class VRH3TwoHandHamletDataConfig(VRH3TwoHandConfig):
         return ComposedModalityTransform(transforms=new_transforms)
 
 
+class VRH3TwoHandJointHamletDataConfig(VRH3TwoHandHamletDataConfig):
+    """`vrh3_two_hand_hamlet` with joint-position state only (no velocity/effort)."""
+
+    state_keys = [
+        "state.left_arm",
+        "state.right_arm",
+        "state.left_hand",
+        "state.right_hand",
+    ]
+    language_keys = ["annotation.human.action.task_description"]
+
+
 ###########################################################################################
 
 DATA_CONFIG_MAP = {
@@ -1231,4 +1243,5 @@ DATA_CONFIG_MAP = {
     "libero_mem_contrastive_sv": LiberoMemContrastiveSvDataConfig(),
     "vrh3_two_hand": VRH3TwoHandConfig(),
     "vrh3_two_hand_hamlet": VRH3TwoHandHamletDataConfig(),
+    "vrh3_two_hand_joint_hamlet": VRH3TwoHandJointHamletDataConfig(),
 }
